@@ -1,0 +1,248 @@
+@font-face {
+  font-family: 'UDShinGoRegular';
+  src: url('/src/assets/fonts/UDShinGoPr6N-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+:root {
+  --bg-color: #0c0d10;
+  --text-white: #ffffff;
+  --font-family: 'UDShinGoRegular', 'A-OTF UDShinGoPr6N', 'Shin Go', 'Noto Sans JP', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default !important; /* 指の形にならない */
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-color);
+  font-family: var(--font-family);
+  color: var(--text-white);
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-color);
+}
+
+.game-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* =========================================
+   左上: 今かかっている数字 (72px ボールド)
+========================================= */
+.overlay-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.score-display {
+  position: absolute;
+  top: 28px;
+  left: 36px; /* 左上に配置 */
+  transform: scale(1);
+  transform-origin: left top;
+  font-size: 72px; /* 2倍サイズ */
+  font-weight: 800; /* 常にボールド */
+  letter-spacing: 2px;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ゲームオーバー時の即座に1.5倍拡大＆赤から徐々に白へ変化 */
+.score-display.game-over-anim {
+  animation: scoreGameOver 2.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes scoreGameOver {
+  0% {
+    transform: scale(1.5);
+    color: #ff1f1f;
+  }
+  20% {
+    transform: scale(1.5);
+    color: #ff1f1f;
+  }
+  100% {
+    transform: scale(1.5);
+    color: #ffffff;
+  }
+}
+
+/* =========================================
+   下端: クルクルしたアイコン + Space丸枠
+========================================= */
+.bottom-reset-btn {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: default !important;
+  color: rgba(255, 255, 255, 0.45);
+  transition: all 0.2s ease;
+}
+
+.bottom-reset-btn:hover {
+  color: rgba(255, 255, 255, 0.95);
+  transform: translateX(-50%) scale(1.04);
+}
+
+.bottom-reset-btn:active {
+  transform: translateX(-50%) scale(0.96);
+}
+
+.reset-icon {
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.bottom-reset-btn:hover .reset-icon {
+  transform: rotate(-180deg);
+}
+
+.space-capsule {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  padding: 3px 12px;
+  line-height: 1.2;
+}
+
+/* =========================================
+   左側 50音表 (コンパクト & 縦線1/3)
+========================================= */
+.drawer-container {
+  position: absolute;
+  top: 50%;
+  height: 340px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  z-index: 100;
+  transform: translateY(-50%) translateX(-400px);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
+  cursor: default !important;
+}
+
+.drawer-container.open {
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ゲームオーバー時は縦線ごと左外へ完全に隠れる */
+.drawer-container.game-over-hide {
+  transform: translateY(-50%) translateX(-450px) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 常に見えている右端：長さを1/3にした端が丸い縦線 */
+.drawer-handle {
+  width: 20px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  order: 2;
+  padding-left: 6px;
+  cursor: default !important;
+}
+
+.handle-bar {
+  width: 3px;
+  height: 33.3%; /* 長さ1/3 */
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 9999px;
+  transition: background 0.2s ease, width 0.2s ease;
+}
+
+.drawer-container:hover .handle-bar,
+.drawer-container.open .handle-bar {
+  background: rgba(255, 255, 255, 0.85);
+  width: 4px;
+}
+
+.drawer-panel {
+  width: 400px;
+  height: 100%;
+  background: rgba(10, 11, 14, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-radius: 0 12px 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 18px;
+  order: 1;
+  cursor: default !important;
+}
+
+.drawer-grid {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  align-items: stretch;
+}
+
+.kana-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kana-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: default !important;
+  transition: color 0.15s ease, transform 0.15s ease;
+  width: 100%;
+}
+
+.kana-item:hover {
+  color: #ffffff;
+  transform: scale(1.15);
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.kana-empty {
+  flex: 1;
+  width: 100%;
+}

@@ -15,6 +15,7 @@ export class Overlay {
   private actionControlsEl!: HTMLElement;
   private xShareBtnEl!: HTMLElement;
   private callbacks: OverlayCallbacks;
+  private isConfirmEnabled: boolean = true;
 
   constructor(container: HTMLElement, callbacks: OverlayCallbacks) {
     this.container = container;
@@ -38,7 +39,7 @@ export class Overlay {
         </svg>
       </button>
 
-      <!-- 右下: 回転ボタン & 決定ボタン (ゲームオーバー時に隠れる) -->
+      <!-- 右下: 回転ボタン & 決定ボタン -->
       <div class="action-controls" id="action-controls">
         <button class="action-btn rotate-btn" id="rotate-btn" title="時計回りに30°回転">
           <svg viewBox="0 0 24 24" width="22" height="22">
@@ -46,7 +47,7 @@ export class Overlay {
           </svg>
           <span class="btn-subtext">30°</span>
         </button>
-        <button class="action-btn confirm-btn" id="confirm-btn" title="実体化 (Enter)">
+        <button class="action-btn confirm-btn" id="confirm-btn" title="決定 (Enter)">
           <svg viewBox="0 0 24 24" width="24" height="24">
             <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
           </svg>
@@ -74,37 +75,34 @@ export class Overlay {
   }
 
   private bindEvents() {
-    // リセット
     this.resetBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
       this.callbacks.onRestart();
     });
 
-    // 決定
     this.confirmBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (!this.isConfirmEnabled) return;
       this.callbacks.onConfirm();
     });
 
-    // 回転
     this.rotateBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
       this.callbacks.onRotate();
     });
 
-    // X共有
     this.xShareBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
       this.callbacks.onShareX();
     });
 
-    // キーボード操作 (Space: リセット, Enter: 決定)
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         e.preventDefault();
         this.callbacks.onRestart();
       } else if (e.code === 'Enter') {
         e.preventDefault();
+        if (!this.isConfirmEnabled) return;
         this.callbacks.onConfirm();
       }
     });
@@ -114,9 +112,6 @@ export class Overlay {
     this.scoreEl.textContent = score.toString();
   }
 
-  /**
-   * ゴースト文字を保持している時の操作ボタンのアクティブ化
-   */
   public setActionControlsActive(active: boolean) {
     if (active) {
       this.actionControlsEl.classList.add('active');
@@ -126,28 +121,31 @@ export class Overlay {
   }
 
   /**
-   * ゲームオーバー時：
-   * 決定ボタンと回転ボタンを隠し、右上にXボタンを表示
+   * 重なりがある場合は決定ボタンを無効化
    */
+  public setConfirmEnabled(enabled: boolean) {
+    this.isConfirmEnabled = enabled;
+    if (enabled) {
+      this.confirmBtnEl.classList.remove('disabled');
+    } else {
+      this.confirmBtnEl.classList.add('disabled');
+    }
+  }
+
   public onGameOver() {
     this.scoreEl.classList.remove('game-over-anim');
     void this.scoreEl.offsetWidth;
     this.scoreEl.classList.add('game-over-anim');
 
-    // 右下のボタンを隠す
     this.actionControlsEl.classList.add('hidden');
-
-    // 右上のXボタンを表示
     this.xShareBtnEl.classList.remove('hidden');
   }
 
-  /**
-   * リセット時
-   */
   public onReset() {
     this.scoreEl.classList.remove('game-over-anim');
     this.actionControlsEl.classList.remove('hidden');
     this.actionControlsEl.classList.remove('active');
     this.xShareBtnEl.classList.add('hidden');
+    this.setConfirmEnabled(true);
   }
 }

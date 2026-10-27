@@ -5,7 +5,7 @@ import { Drawer } from './ui/drawer';
 import { Overlay } from './ui/overlay';
 import Matter from 'matter-js';
 
-const { Body } = Matter;
+const { Body, Query } = Matter;
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -30,6 +30,10 @@ export class Game {
   private pointerGrabOffsetX: number = 0;
   private pointerGrabOffsetY: number = 0;
 
+  // 重なり検知用のセンサー剛体
+  private ghostSensorBody: Matter.Body | null = null;
+  private isGhostOverlapping: boolean = false;
+
   // カメラ（落下後のスクロール/パン用）
   private cameraX: number = 0;
   private cameraY: number = 0;
@@ -50,7 +54,6 @@ export class Game {
 
     this.ctx = this.canvas.getContext('2d', { alpha: false })!;
 
-    // 物理エンジン
     this.physics = new PhysicsEngine({
       subSteps: 12,
       gravityY: 1.25,
@@ -81,7 +84,6 @@ export class Game {
         this.confirmAndMaterialize();
       },
       onRotate: () => {
-        // 30度ずつ時計回りに回転
         this.rotateGhost(Math.PI / 6);
       },
       onShareX: () => {
@@ -121,8 +123,10 @@ export class Game {
   private resetGame() {
     this.isDropped = false;
     this.ghostChar = null;
+    this.ghostSensorBody = null;
     this.isHoldingGhost = false;
     this.isPointerDown = false;
+    this.isGhostOverlapping = false;
     this.ghostAngle = 0;
     this.currentScore = 0;
     this.cameraX = 0;
@@ -145,7 +149,7 @@ export class Game {
   }
 
   /**
-   * 50音表から文字を選んだ時（ゴーストの出現）
+   * 50音表から文字を選んだ時
    */
   private selectGhostChar(char: string, worldX: number, worldY: number) {
     if (this.isDropped) return;
@@ -159,8 +163,15 @@ export class Game {
     this.pointerGrabOffsetX = 0;
     this.pointerGrabOffsetY = 0;
 
-    // 操作ボタンのアクティブ化
+    // 重なり検知用のセンサーボディを作成（ワールドには追加せず衝突クエリのみで使用）
+    const bodyData = createHiraganaBody(char, worldX, worldY, 0, 1.0);
+    if (bodyData) {
+      this.ghostSensorBody = bodyData.body;
+      (this.ghostSensorBody as any).isSensor = true;
+    }
+
     this.overlay.setActionControlsActive(true);
+    this.checkOverlap();
   }
 
   /**
@@ -169,13 +180,38 @@ export class Game {
   private rotateGhost(angleDelta: number) {
     if (!this.ghostChar) return;
     this.ghostAngle += angleDelta;
+    this.checkOverlap();
+  }
+
+  /**
+   * 既存の文字・ピンとの重なりチェック
+   */
+  private checkOverlap() {
+    if (!this.ghostSensorBody) {
+      this.isGhostOverlapping = false;
+      this.overlay.setConfirmEnabled(true);
+      return;
+    }
+
+    Body.setPosition(this.ghostSensorBody, { x: this.ghostX, y: this.ghostY });
+    Body.setAngle(this.ghostSensorBody, this.ghostAngle);
+
+    const obstacles = this.physics.getBodies();
+    const cols = Query.collides(this.ghostSensorBody, obstacles);
+
+    // 有意なめり込み（depth > 0.6）があるか
+    this.isGhostOverlapping = cols.some((c) => c.depth > 0.6);
+
+    // 重なっている時は決定ボタンを無効化
+    this.overlay.setConfirmEnabled(!this.isGhostOverlapping);
   }
 
   /**
    * 決定ボタン / Enterキー押下で実体化（投下）
    */
   private confirmAndMaterialize() {
-    if (this.isDropped || !this.ghostChar) return;
+    // 重なりがある場合は絶対に配置させない！
+    if (this.isDropped || !this.ghostChar || this.isGhostOverlapping) return;
 
     const char = this.ghostChar;
     const x = this.ghostX;
@@ -184,8 +220,10 @@ export class Game {
 
     // ゴースト状態を解除し、即座に操作不能に
     this.ghostChar = null;
+    this.ghostSensorBody = null;
     this.isHoldingGhost = false;
     this.isPointerDown = false;
+    this.isGhostOverlapping = false;
     this.overlay.setActionControlsActive(false);
 
     // 物理世界に実体として生成
@@ -199,9 +237,6 @@ export class Game {
     }
   }
 
-  /**
-   * Xで結果をポスト
-   */
   private shareOnX() {
     const text = `${this.currentScore}個のひらがなを引っ掛けました！#かけがな `;
     const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
@@ -209,7 +244,6 @@ export class Game {
   }
 
   private setupInputEvents() {
-    // ポインター座標のヘルパー
     const getPointerWorldPos = (clientX: number, clientY: number) => {
       return {
         x: clientX - this.cameraX,
@@ -217,10 +251,8 @@ export class Game {
       };
     };
 
-    // マウス / タッチ共通の開始処理
     const handlePointerDown = (clientX: number, clientY: number) => {
       if (this.isDropped) {
-        // 落下後は画面全体のパンスクロール
         this.isPanning = true;
         this.panStartX = clientX;
         this.panStartY = clientY;
@@ -232,13 +264,11 @@ export class Game {
       if (this.isHoldingGhost) {
         const p = getPointerWorldPos(clientX, clientY);
         this.isPointerDown = true;
-        // ゴーストの中心とタッチ位置のオフセットを記録（自然なドラッグ感）
         this.pointerGrabOffsetX = this.ghostX - p.x;
         this.pointerGrabOffsetY = this.ghostY - p.y;
       }
     };
 
-    // マウス / タッチ共通の移動処理
     const handlePointerMove = (clientX: number, clientY: number) => {
       if (this.isPanning && this.isDropped) {
         this.cameraX = this.panBaseCamX + (clientX - this.panStartX);
@@ -250,16 +280,15 @@ export class Game {
         const p = getPointerWorldPos(clientX, clientY);
         this.ghostX = p.x + this.pointerGrabOffsetX;
         this.ghostY = p.y + this.pointerGrabOffsetY;
+        this.checkOverlap();
       }
     };
 
-    // マウス / タッチ共通の終了処理（途中で離しても実体化しない！）
     const handlePointerUp = () => {
       this.isPointerDown = false;
       this.isPanning = false;
     };
 
-    // マウスイベント
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
         handlePointerDown(e.clientX, e.clientY);
@@ -274,7 +303,6 @@ export class Game {
       handlePointerUp();
     });
 
-    // タッチイベント（スマホ対応）
     window.addEventListener('touchstart', (e) => {
       if (e.touches.length > 0) {
         const touch = e.touches[0];
@@ -293,11 +321,9 @@ export class Game {
       handlePointerUp();
     }, { passive: true });
 
-    // マウスホイール操作（ゴースト回転 & 落下後の上下スクロール）
     window.addEventListener('wheel', (e) => {
       if (this.isHoldingGhost) {
         e.preventDefault();
-        // 30度刻みで回転
         this.rotateGhost(Math.sign(e.deltaY) * (Math.PI / 6));
       } else if (this.isDropped) {
         e.preventDefault();
@@ -330,18 +356,13 @@ export class Game {
     }
   }
 
-  /**
-   * ゲームオーバー発生時
-   */
   private triggerDrop() {
     this.isDropped = true;
     this.ghostChar = null;
+    this.ghostSensorBody = null;
     this.isHoldingGhost = false;
 
-    // 50音表を隠す
     this.drawer.hideOnGameOver();
-
-    // 決定・回転ボタンを隠し、右上にXボタンを表示
     this.overlay.onGameOver();
   }
 
@@ -383,9 +404,9 @@ export class Game {
       this.drawShinGoBody(ctx, body);
     }
 
-    // ゴースト状態の文字（半透明の幽霊状態・干渉なし）
+    // ゴースト状態の文字（重なり時は薄い赤色、安全時は半透明白）
     if (this.ghostChar && this.isHoldingGhost) {
-      this.drawGhostChar(ctx, this.ghostChar, this.ghostX, this.ghostY, this.ghostAngle);
+      this.drawGhostChar(ctx, this.ghostChar, this.ghostX, this.ghostY, this.ghostAngle, this.isGhostOverlapping);
     }
 
     ctx.restore();
@@ -404,9 +425,6 @@ export class Game {
     ctx.restore();
   }
 
-  /**
-   * 実体化された文字の描画
-   */
   private drawShinGoBody(ctx: CanvasRenderingContext2D, body: Matter.Body) {
     const data = (body as any).gameData;
     if (!data || !data.data) return;
@@ -435,9 +453,17 @@ export class Game {
   }
 
   /**
-   * ゴースト（幽霊状態）の描画: 半透明の白い新ゴ文字
+   * ゴースト（幽霊状態）の描画
+   * 重なっている時は赤色警告、安全な時は美しい半透明白
    */
-  private drawGhostChar(ctx: CanvasRenderingContext2D, char: string, x: number, y: number, angle: number) {
+  private drawGhostChar(
+    ctx: CanvasRenderingContext2D,
+    char: string,
+    x: number,
+    y: number,
+    angle: number,
+    isOverlapping: boolean
+  ) {
     const charData = SHINGO_DATA[char];
     if (!charData) return;
 
@@ -445,8 +471,16 @@ export class Game {
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    // 半透明（幽霊状態）
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    if (isOverlapping) {
+      // 重なり警告カラー（配置不可）
+      ctx.fillStyle = 'rgba(255, 75, 75, 0.45)';
+      ctx.strokeStyle = 'rgba(255, 95, 95, 0.8)';
+    } else {
+      // 安全な配置可能カラー
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    }
+
     ctx.beginPath();
     for (const contour of charData.contours) {
       if (contour.length === 0) continue;
@@ -458,9 +492,7 @@ export class Game {
     }
     ctx.fill('evenodd');
 
-    // 繊細な輪郭線
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 1.2;
     ctx.stroke();
 
     ctx.restore();

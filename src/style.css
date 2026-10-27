@@ -28,7 +28,7 @@ html, body {
   background-color: var(--bg-color);
   font-family: var(--font-family);
   color: var(--text-white);
-  touch-action: none; /* スマホでの不要なスクロールやピンチズームを防止 */
+  touch-action: none;
 }
 
 #app {
@@ -181,6 +181,16 @@ html, body {
   box-shadow: 0 0 16px rgba(255, 255, 255, 0.25);
 }
 
+/* 重なり時の決定ボタン無効化 */
+.confirm-btn.disabled {
+  opacity: 0.25 !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: rgba(255, 255, 255, 0.3) !important;
+  background: rgba(18, 20, 24, 0.88) !important;
+}
+
 .action-btn:hover {
   transform: scale(1.06);
   color: #ffffff;
@@ -278,7 +288,7 @@ html, body {
 
 .handle-bar {
   width: 3.5px;
-  height: 33.3%; /* 長さ1/3 */
+  height: 33.3%;
   background: rgba(255, 255, 255, 0.35);
   border-radius: 9999px;
   transition: background 0.2s ease, width 0.2s ease;

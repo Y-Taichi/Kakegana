@@ -7,7 +7,8 @@ export interface DrawerCallbacks {
 export class Drawer {
   private container: HTMLElement;
   private drawerEl!: HTMLElement;
-  private isHovered: boolean = false;
+  private handleEl!: HTMLElement;
+  private isOpen: boolean = false;
   private callbacks: DrawerCallbacks;
   private isLocked: boolean = false;
 
@@ -43,53 +44,98 @@ export class Drawer {
           ${gridHtml}
         </div>
       </div>
-      <div class="drawer-handle" id="drawer-handle">
+      <div class="drawer-handle" id="drawer-handle" role="button" aria-label="五十音表">
         <div class="handle-bar"></div>
       </div>
     `;
 
     this.container.appendChild(this.drawerEl);
+    this.handleEl = this.drawerEl.querySelector('#drawer-handle')!;
   }
 
   private bindEvents() {
+    // 1. PC向けホバー開閉 (マウス操作時)
     this.drawerEl.addEventListener('mouseenter', () => {
       if (this.isLocked) return;
-      this.isHovered = true;
+      this.isOpen = true;
       this.updateOpenState();
     });
 
     this.drawerEl.addEventListener('mouseleave', () => {
-      this.isHovered = false;
-      this.updateOpenState();
+      if (!this.isLocked) {
+        this.isOpen = false;
+        this.updateOpenState();
+      }
     });
 
+    // 2. スマホ＆クリック対応: 引き手（縦線）をタップ/クリックでトグル開閉
+    // touchend/clickの二重発火やミリ秒差の誤トグルを完全に防止するデバウンス制御
+    let lastToggleTs = 0;
+    const handleToggle = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const now = performance.now();
+      if (now - lastToggleTs < 350) return;
+      lastToggleTs = now;
+
+      if (this.isLocked) return;
+      this.isOpen = !this.isOpen;
+      this.updateOpenState();
+    };
+
+    this.handleEl.addEventListener('pointerdown', handleToggle);
+    this.handleEl.addEventListener('click', handleToggle);
+
+    // ドロワー内部のタッチ・ポインター操作が背面のゲームキャンバス（ドラッグやスクロール）に貫通するのを防ぐ
+    const stopPropagation = (e: Event) => {
+      e.stopPropagation();
+    };
+    this.drawerEl.addEventListener('pointerdown', stopPropagation);
+    this.drawerEl.addEventListener('mousedown', stopPropagation);
+    this.drawerEl.addEventListener('touchstart', stopPropagation, { passive: true });
+
+    // 3. 文字アイテムの選択（クリック & タッチ）
     const kanaItems = this.drawerEl.querySelectorAll<HTMLElement>('.kana-item');
     kanaItems.forEach((item) => {
-      item.addEventListener('mousedown', (e) => {
-        if (e.button !== 0 || this.isLocked) return;
+      let lastSelectTs = 0;
+      const selectChar = (e: Event, clientX: number, clientY: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const now = performance.now();
+        if (now - lastSelectTs < 350) return;
+        lastSelectTs = now;
+
+        if (this.isLocked) return;
         const char = item.getAttribute('data-char');
         if (char) {
-          e.preventDefault();
-          this.callbacks.onSelectChar(char, e.clientX, e.clientY);
+          this.callbacks.onSelectChar(char, clientX, clientY);
           this.close();
         }
+      };
+
+      item.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 && e.button !== -1) return;
+        selectChar(e, e.clientX, e.clientY);
       });
 
-      item.addEventListener('touchstart', (e) => {
-        if (this.isLocked) return;
-        const touch = e.touches[0];
-        const char = item.getAttribute('data-char');
-        if (char && touch) {
-          e.preventDefault();
-          this.callbacks.onSelectChar(char, touch.clientX, touch.clientY);
-          this.close();
-        }
-      }, { passive: false });
+      item.addEventListener('click', (e) => {
+        selectChar(e, e.clientX, e.clientY);
+      });
     });
+
+    // 4. 画面のどこかをタップ/クリックしたらドロワーを閉じる（スマホで閉じやすいように）
+    const handleOutside = (e: Event) => {
+      if (!this.isOpen || this.isLocked) return;
+      const target = e.target as HTMLElement;
+      if (target && !this.drawerEl.contains(target)) {
+        this.close();
+      }
+    };
+    window.addEventListener('pointerdown', handleOutside);
   }
 
   private updateOpenState() {
-    if (this.isHovered && !this.isLocked) {
+    if (this.isOpen && !this.isLocked) {
       this.drawerEl.classList.add('open');
     } else {
       this.drawerEl.classList.remove('open');
@@ -97,26 +143,20 @@ export class Drawer {
   }
 
   public close() {
-    this.isHovered = false;
+    this.isOpen = false;
     this.drawerEl.classList.remove('open');
   }
 
-  /**
-   * ゲームオーバー時に線ごとすべて左側に隠れて見えなくなるようにアニメーション
-   */
   public hideOnGameOver() {
     this.isLocked = true;
-    this.isHovered = false;
+    this.isOpen = false;
     this.drawerEl.classList.remove('open');
     this.drawerEl.classList.add('game-over-hide');
   }
 
-  /**
-   * リセット時に再表示
-   */
   public resetState() {
     this.isLocked = false;
-    this.isHovered = false;
+    this.isOpen = false;
     this.drawerEl.classList.remove('open');
     this.drawerEl.classList.remove('game-over-hide');
   }

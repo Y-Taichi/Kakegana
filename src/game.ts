@@ -1,11 +1,11 @@
 import { PhysicsEngine } from './physics/engine';
 import { createHiraganaBody, createAnchorPin } from './physics/bodyFactory';
-import { SHINGO_DATA, ShinGoCharData } from './physics/shingoData';
+import { SHINGO_DATA, ShinGoCharData, Point } from './physics/shingoData';
 import { Drawer } from './ui/drawer';
 import { Overlay } from './ui/overlay';
 import Matter from 'matter-js';
 
-const { Body, Query } = Matter;
+const { Body } = Matter;
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -32,6 +32,7 @@ export class Game {
 
   // 重なり検知用のセンサー剛体
   private ghostSensorBody: Matter.Body | null = null;
+  private ghostLocalCenter: Point = { x: 0, y: 0 };
   private isGhostOverlapping: boolean = false;
 
   // カメラ（落下後のスクロール/パン用）
@@ -71,8 +72,8 @@ export class Game {
 
   private initUI() {
     this.drawer = new Drawer(this.container, {
-      onSelectChar: (char, startX, startY) => {
-        this.selectGhostChar(char, startX - this.cameraX, startY - this.cameraY);
+      onSelectChar: (char, clientX, clientY) => {
+        this.selectGhostChar(char, clientX, clientY);
       }
     });
 
@@ -124,6 +125,7 @@ export class Game {
     this.isDropped = false;
     this.ghostChar = null;
     this.ghostSensorBody = null;
+    this.ghostLocalCenter = { x: 0, y: 0 };
     this.isHoldingGhost = false;
     this.isPointerDown = false;
     this.isGhostOverlapping = false;
@@ -151,23 +153,38 @@ export class Game {
   /**
    * 50音表から文字を選んだ時
    */
-  private selectGhostChar(char: string, worldX: number, worldY: number) {
+  private selectGhostChar(char: string, clientX: number, clientY: number) {
     if (this.isDropped) return;
 
     this.ghostChar = char;
-    this.ghostX = worldX;
-    this.ghostY = worldY;
     this.ghostAngle = 0;
     this.isHoldingGhost = true;
-    this.isPointerDown = true;
+    this.isPointerDown = false; // ドロワーのタップ/クリック完了時は指が離れている状態
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const anchorY = Math.max(110, height * 0.16);
+
+    // ドロワー（画面左端）から選んだ場合は、支点のすぐ下の見やすい中央位置にスポーン
+    if (clientX < 340) {
+      this.ghostX = width / 2;
+      this.ghostY = anchorY + 115;
+    } else {
+      this.ghostX = clientX - this.cameraX;
+      this.ghostY = clientY - this.cameraY;
+    }
+
     this.pointerGrabOffsetX = 0;
     this.pointerGrabOffsetY = 0;
 
-    // 重なり検知用のセンサーボディを作成（ワールドには追加せず衝突クエリのみで使用）
-    const bodyData = createHiraganaBody(char, worldX, worldY, 0, 1.0);
+    // 重なり検知用のセンサーボディを作成（ワールドには追加せず衝突判定のみで使用）
+    const bodyData = createHiraganaBody(char, this.ghostX, this.ghostY, 0, 1.0);
     if (bodyData) {
       this.ghostSensorBody = bodyData.body;
       (this.ghostSensorBody as any).isSensor = true;
+      this.ghostLocalCenter = bodyData.localCenter;
+    } else {
+      this.ghostLocalCenter = { x: 0, y: 0 };
     }
 
     this.overlay.setActionControlsActive(true);
@@ -178,7 +195,7 @@ export class Game {
    * 時計回りに回転
    */
   private rotateGhost(angleDelta: number) {
-    if (!this.ghostChar) return;
+    if (!this.ghostChar || !this.ghostSensorBody) return;
     this.ghostAngle += angleDelta;
     this.checkOverlap();
   }
@@ -197,13 +214,47 @@ export class Game {
     Body.setAngle(this.ghostSensorBody, this.ghostAngle);
 
     const obstacles = this.physics.getBodies();
-    const cols = Query.collides(this.ghostSensorBody, obstacles);
-
-    // 有意なめり込み（depth > 0.6）があるか
-    this.isGhostOverlapping = cols.some((c) => c.depth > 0.6);
+    this.isGhostOverlapping = this.isBodyOverlapping(this.ghostSensorBody, obstacles);
 
     // 重なっている時は決定ボタンを無効化
     this.overlay.setConfirmEnabled(!this.isGhostOverlapping);
+  }
+
+  /**
+   * 複合剛体の実メッシュパーツ（三角形単位）での精密な重なり判定
+   * parts[0] の凸包（Convex Hull）を除外することで、文字の空洞やフック部分に
+   * ピンや文字が入っても誤判定（赤色警告）が発生しないようにする
+   */
+  private isBodyOverlapping(ghostBody: Matter.Body, obstacles: Matter.Body[]): boolean {
+    const ghostParts = ghostBody.parts.length > 1 ? ghostBody.parts.slice(1) : [ghostBody];
+
+    for (let o = 0; o < obstacles.length; o++) {
+      const obstacle = obstacles[o];
+      if (obstacle === ghostBody) continue;
+
+      // 剛体全体のバウンディングボックスが交差していなければスキップ
+      if (!Matter.Bounds.overlaps(ghostBody.bounds, obstacle.bounds)) {
+        continue;
+      }
+
+      // 障害物のパーツ（凸包 parts[0] を除外した実パーツ）
+      const obstacleParts = obstacle.parts.length > 1 ? obstacle.parts.slice(1) : [obstacle];
+
+      for (let i = 0; i < ghostParts.length; i++) {
+        const gp = ghostParts[i];
+        for (let j = 0; j < obstacleParts.length; j++) {
+          const op = obstacleParts[j];
+          if (Matter.Bounds.overlaps(gp.bounds, op.bounds)) {
+            const col = Matter.Collision.collides(gp, op, undefined as any);
+            if (col && col.collided && col.depth > 0.6) {
+              return true; // 実際の画線（ストローク）同士がめり込んでいる
+            }
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -470,6 +521,7 @@ export class Game {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
+    ctx.translate(-this.ghostLocalCenter.x, -this.ghostLocalCenter.y);
 
     if (isOverlapping) {
       // 重なり警告カラー（配置不可）

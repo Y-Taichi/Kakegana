@@ -75,6 +75,16 @@ export class Overlay {
   }
 
   private bindEvents() {
+    // ボタン操作が背面のゲームキャンバス（文字ドラッグやカメラパン）に伝播しないよう隔離
+    const stopPropagation = (e: Event) => {
+      e.stopPropagation();
+    };
+    [this.resetBtnEl, this.confirmBtnEl, this.rotateBtnEl, this.xShareBtnEl, this.actionControlsEl].forEach((el) => {
+      el.addEventListener('pointerdown', stopPropagation);
+      el.addEventListener('mousedown', stopPropagation);
+      el.addEventListener('touchstart', stopPropagation, { passive: true });
+    });
+
     this.resetBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
       this.callbacks.onRestart();
